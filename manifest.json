@@ -1,0 +1,11 @@
+{
+    "id": "obsimap-custom",
+    "name": "Simple Mindmap (custom)",
+    "version": "1.1.7-custom.2",
+    "minAppVersion": "1.4.14",
+    "description": "Custom build of Simple Mindmap: chip colours, text wrapping, children on four sides, styled note links.",
+    "author": "Creative781 (custom build by Alex Delaveau)",
+    "authorUrl": "https://github.com/Creative781",
+    "fundingUrl": "https://www.buymeacoffee.com/creative781",
+    "isDesktopOnly": false
+}
