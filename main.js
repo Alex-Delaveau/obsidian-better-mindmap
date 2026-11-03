@@ -190,11 +190,42 @@ var VERTICAL_GAP = 50;
 var SIBLING_GAP = 30;
 var SLOT_PAD = 10;
 function inheritedDir(child, parentIsRoot, parentDir, radial) {
-  if (child.dir)
+  if (child.dir && (parentIsRoot || child.dir !== OPPOSITE[parentDir]))
     return child.dir;
   if (parentIsRoot)
     return radial && child.side === "left" ? "w" : "e";
   return parentDir;
+}
+function blockedDir(nodeDir, isRoot) {
+  return isRoot ? null : OPPOSITE[nodeDir];
+}
+var CLOCKWISE = ["n", "e", "s", "w"];
+function mapDir(d, from, to) {
+  if (from === to)
+    return d;
+  if (d === from || d === OPPOSITE[from])
+    return to;
+  if (to === OPPOSITE[from])
+    return d;
+  const k = (CLOCKWISE.indexOf(to) - CLOCKWISE.indexOf(from) + 4) % 4;
+  return CLOCKWISE[(CLOCKWISE.indexOf(d) + k) % 4];
+}
+function reorientSubtree(node, from, to, oldDirOf) {
+  var _a, _b;
+  for (const child of node.children) {
+    const oldChild = (_b = (_a = oldDirOf.get(child.id)) != null ? _a : child.dir) != null ? _b : from;
+    let newChild;
+    if (child.dir) {
+      newChild = mapDir(oldChild, from, to);
+      if (newChild === to)
+        delete child.dir;
+      else
+        child.dir = newChild;
+    } else {
+      newChild = to;
+    }
+    reorientSubtree(child, oldChild, newChild, oldDirOf);
+  }
 }
 var bounds = (rects) => rects.reduce(
   (a, r) => ({
@@ -358,10 +389,12 @@ function poleCenter(size, dir) {
       return { x: a.x, y: a.y + POLE_OFFSET };
   }
 }
-function hitPole(size, relX, relY, radius, prefer) {
+function hitPole(size, relX, relY, radius, prefer, exclude) {
   let best = null;
   let bestDist = Infinity;
   for (const d of DIRS) {
+    if (d === exclude)
+      continue;
     const p = poleCenter(size, d);
     const dist = Math.hypot(relX - p.x, relY - p.y);
     const r = d === prefer ? radius * 1.7 : radius;
@@ -1720,6 +1753,7 @@ ${jsonData}
   promoteNode() {
     if (this.selectedNodeIds.size === 0 || this.selectedNodeIds.has("root"))
       return;
+    const before = new Map(this.dirOf);
     const firstId = this.selectedNodeIds.values().next().value;
     const parent = this.findParentNode(this.mindMapData.root, firstId);
     if (!parent || parent.id === "root")
@@ -1745,6 +1779,7 @@ ${jsonData}
           delete moved.dir;
         grandParent.children.splice(parentIndexInGrandParent + insertOffset, 0, moved);
         insertOffset++;
+        this.reorientBranches([moved], before);
       }
       this.render();
       this.scrollSelectionIntoView();
@@ -1754,6 +1789,7 @@ ${jsonData}
   demoteNode() {
     if (this.selectedNodeIds.size === 0 || this.selectedNodeIds.has("root"))
       return;
+    const before = new Map(this.dirOf);
     const firstId = this.selectedNodeIds.values().next().value;
     const parent = this.findParentNode(this.mindMapData.root, firstId);
     if (parent) {
@@ -1775,6 +1811,7 @@ ${jsonData}
           else
             delete moved.dir;
           previousSibling.children.push(moved);
+          this.reorientBranches([moved], before);
         }
         this.render();
         this.scrollSelectionIntoView();
@@ -2231,10 +2268,12 @@ ${jsonData}
     if (nodes.length === 0)
       return;
     const current = new Set(nodes.map((n) => this.dirOf.get(n.id)));
+    const parent = this.findParentNode(this.mindMapData.root, nodes[0].id);
+    const blocked = parent ? this.blockedSideOf(parent) : null;
     const menu = new import_obsidian.Menu();
     for (const d of DIRS) {
       menu.addItem(
-        (item) => item.setTitle(DIR_LABELS[d]).setIcon(DIR_ICONS[d]).setChecked(current.size === 1 && current.has(d)).onClick(() => this.applySide(d))
+        (item) => item.setTitle(d === blocked ? `${DIR_LABELS[d]} (faces the grandparent)` : DIR_LABELS[d]).setIcon(DIR_ICONS[d]).setChecked(current.size === 1 && current.has(d)).setDisabled(d === blocked).onClick(() => this.applySide(d))
       );
     }
     menu.addSeparator();
@@ -2252,6 +2291,8 @@ ${jsonData}
     if (ids.length === 0)
       return;
     this.pushHistory();
+    const before = new Map(this.dirOf);
+    const changed = [];
     for (const id of ids) {
       const node = this.findNodeById(this.mindMapData.root, id);
       const parent = this.findParentNode(this.mindMapData.root, id);
@@ -2261,7 +2302,9 @@ ${jsonData}
         this.setDir(node, parent, dir);
       else
         delete node.dir;
+      changed.push(node);
     }
+    this.reorientBranches(changed, before);
     this.render();
     this.scrollSelectionIntoView();
     void this.saveMindMap(true);
@@ -2448,7 +2491,7 @@ ${jsonData}
       const relX = mapX - ((_a = node.x) != null ? _a : 0);
       const relY = mapY - ((_b = node.y) != null ? _b : 0);
       const prefer = node.id === this.dragTargetNodeId ? this.dragPole : null;
-      const pole = hitPole(size, relX, relY, this.poleRadius(), prefer);
+      const pole = hitPole(size, relX, relY, this.poleRadius(), prefer, this.blockedSideOf(node));
       if (!pole)
         continue;
       const p = poleCenter(size, pole);
@@ -2618,6 +2661,7 @@ ${jsonData}
   }
   moveNode(nodeId, targetId, mode, pole = null) {
     var _a;
+    const before = new Map(this.dirOf);
     const idsToMove = this.selectedNodeIds.has(nodeId) ? Array.from(this.selectedNodeIds) : [nodeId];
     const firstId = idsToMove[0];
     const oldParent = this.findParentNode(this.mindMapData.root, firstId);
@@ -2690,6 +2734,7 @@ ${jsonData}
         }
       }
       this.pendingRootDropSide = null;
+      this.reorientBranches(nodesToMove, before);
       this.render();
       void this.saveMindMap(true);
     }
@@ -2854,8 +2899,30 @@ ${jsonData}
     const d = this.dirOf.get(node.id);
     return node.id !== "root" && (d === "n" || d === "s");
   }
+  /** Side of a chip facing its own parent: its children cannot go there. */
+  blockedSideOf(node) {
+    var _a;
+    return blockedDir((_a = this.dirOf.get(node.id)) != null ? _a : "e", node.id === "root");
+  }
+  /**
+   * After nodes changed side (moved, re-parented, side menu), turn their branches
+   * with them so no grandchild ends up facing back towards its grandparent.
+   * `before` holds the sides from the layout preceding the change.
+   */
+  reorientBranches(nodes, before) {
+    var _a;
+    for (const node of nodes) {
+      const parent = this.findParentNode(this.mindMapData.root, node.id);
+      if (!parent)
+        continue;
+      const to = this.childDirOf(parent, node);
+      reorientSubtree(node, (_a = before.get(node.id)) != null ? _a : to, to, before);
+    }
+  }
   /** Put `node` on side `dir` of `parent`; stores nothing when that is already the inherited side. */
   setDir(node, parent, dir) {
+    if (dir === this.blockedSideOf(parent))
+      return;
     if (parent.id === "root" && this.isRadialLayout() && (dir === "e" || dir === "w")) {
       node.side = dir === "w" ? "left" : "right";
     }
@@ -3140,6 +3207,8 @@ ${jsonData}
       pole.setAttribute("cy", p.y.toString());
       pole.setAttribute("r", "6");
       pole.classList.add("drop-pole", `pole-${d}`);
+      if (d === this.blockedSideOf(node))
+        pole.classList.add("is-blocked");
       nodeG.appendChild(pole);
     }
     const lineLen = 80;

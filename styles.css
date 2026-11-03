@@ -554,6 +554,11 @@ body .tree-item-self[data-path$=".mindmap"] .tree-item-icon::before {
     opacity: 0.85;
 }
 
+/* The side facing the chip's own parent cannot take children. */
+.mind-map-view .drop-pole.is-blocked {
+    display: none;
+}
+
 .mind-map-view .drop-pole.is-active {
     opacity: 1;
     fill: var(--interactive-accent);
