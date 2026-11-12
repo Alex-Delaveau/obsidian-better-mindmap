@@ -1,0 +1,25 @@
+{
+    "name": "better-mindmap",
+    "version": "1.3.0",
+    "description": "A powerful keyboard-centric mind map plugin for Obsidian.",
+    "main": "main.js",
+    "scripts": {
+        "dev": "node esbuild.config.mjs",
+        "build": "node esbuild.config.mjs production",
+        "test": "node scripts/test.mjs"
+    },
+    "keywords": [
+        "obsidian",
+        "plugin",
+        "mindmap"
+    ],
+    "author": "Creative781",
+    "license": "MIT",
+    "devDependencies": {
+        "@types/node": "^16.11.21",
+        "esbuild": "0.17.11",
+        "obsidian": "latest",
+        "tslib": "latest",
+        "typescript": "^4.9.5"
+    }
+}

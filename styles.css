@@ -577,3 +577,19 @@ body .tree-item-self[data-path$=".mindmap"] .tree-item-icon::before {
     stroke-dasharray: 6 5;
     pointer-events: none;
 }
+
+/* --- Image export: hide UI chrome while the map is captured --- */
+.mindmap-svg-container.is-exporting .mindmap-node-toggle,
+.mindmap-svg-container.is-exporting .mindmap-node-toggle-symbol,
+.mindmap-svg-container.is-exporting .mindmap-node-toggle-hit,
+.mindmap-svg-container.is-exporting .drop-pole,
+.mindmap-svg-container.is-exporting .drag-indicator-line,
+.mindmap-svg-container.is-exporting .mindmap-ghost-node,
+.mindmap-svg-container.is-exporting .mindmap-drop-link {
+    display: none;
+}
+
+/* No transition may run while computed colours are captured (theme swap). */
+.mindmap-svg-container.is-exporting * {
+    transition: none !important;
+}

@@ -1,0 +1,104 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+
+## [1.1.7] - 2026-07-19
+
+### Fixed
+
+- Restore Obsidian 1.13+ settings search by re-adding a complete `getSettingDefinitions()` (with search aliases) while keeping `display()` for older Obsidian. Avoid `PluginSettingTab.update()`.
+
+## [1.1.6] - 2026-07-19
+
+### Fixed
+
+- Remove incomplete `getSettingDefinitions()` so Obsidian settings search again finds **Simple Mindmap** via the classic `display()` settings tab (restores pre-1.1.2 behavior on current Obsidian).
+
+## [1.1.5] - 2026-07-19
+
+### Fixed
+
+- Remove GPU compositing hacks (`translateZ`, `contain`, `isolation`, `backdrop-filter`) that could leave ghosted afterimages on Obsidian sidebars. Keep SVG viewport clipping for map content.
+
+## [1.1.4] - 2026-07-19
+
+### Fixed
+
+- Stop calling `PluginSettingTab.update()` (Obsidian 1.13+ only) while `minAppVersion` remains `1.4.14`, which caused the `no-unsupported-api` review failure.
+- Tighten error typing for linked-note rename failures; drop CSS `!important` from map clipping styles.
+
+## [1.1.3] - 2026-07-19
+
+### Fixed
+
+- Prevent map nodes from painting into left/right Obsidian sidebars while panning by clipping the SVG viewport in-canvas (review-safe; no CSS `clip-path`) and hardening leaf overflow containment.
+
+## [1.1.2] - 2026-07-19
+
+### Fixed
+
+- Satisfy Obsidian community review: move static styles to CSS classes, use `setCssStyles` only for dynamic layout, prefer `window.setTimeout` / `window.requestAnimationFrame`, type-safe settings load and drag handling.
+- Add declarative `getSettingDefinitions()` for Obsidian 1.13+ settings search (keep `display()` for older versions).
+- Drop `clip-path` / `setDynamicTooltip` usages flagged by the review linter.
+
+## [1.1.1] - 2026-07-18
+
+### Fixed
+
+- Prevent mind map nodes and selection glow from painting into adjacent Obsidian sidebars (clip SVG view; remove CSS `drop-shadow` filters that escaped overflow).
+
+## [1.1.0] - 2026-07-18
+
+### Added
+
+- **Radial mind map layout** — Choose outline (rightward list) or radial (balanced left/right) in settings. New root topics auto-balance to the less crowded side; arrow keys follow on-screen direction on left branches.
+
+## [1.0.3] - 2026-05-28
+
+### Fixed
+
+- Stuck keyboard focus when interacting with the view header title; map hotkeys no longer fire from header/title input.
+- New mind maps now open as a normal document without a forced rename modal.
+- Drag indicator lines now appear reliably while dragging nodes (no inline opacity override).
+
+### Changed
+
+- Renaming a mind map now always uses a modal (`F2` or right-click) instead of inline title editing, eliminating focus chaos between title and map panes.
+- Reduced vault enumeration: replaced `getFiles` / `getMarkdownFiles` / `getAllLoadedFiles` with scoped tree walks and incremental `.mindmap` tracking.
+- Build no longer depends on the `builtin-modules` package; uses Node's built-in `node:module` instead.
+- CSS cleanup: removed `!important` overrides where possible and dropped `mask-image` for the `.mindmap` icon to broaden Obsidian/browser support.
+
+### Added
+
+- GitHub Actions release workflow that builds the plugin on tag push and publishes a release with `main.js`, `manifest.json`, and `styles.css` along with build provenance attestations.
+
+## [1.0.2] - 2026-05-26
+
+### Fixed
+
+- Keep newly added and moved nodes visible in the map pane when adding children/siblings, reordering, or promoting/demoting.
+- Pan adjustment uses live node bounds so the view stays correct when Obsidian sidebars resize the editor area.
+
+## [1.0.1] - 2026-05-25
+
+### Changed
+
+- Renamed plugin display name to **Simple Mindmap** for Obsidian community trademark requirements.
+
+## [1.0.0] - 2026-05-24
+
+### Added
+
+- Initial public release for GitHub and Obsidian community plugin submission.
+- Keyboard-centric mind map view with `.mindmap` file support.
+- Wiki-linked notes, drag-and-drop, multi-select, and undo.
+- Markdown outline import/export and full-note compile export.
+- Customizable hotkeys and map themes in settings.
+
+[1.0.3]: https://github.com/Creative781/obsimap/releases/tag/1.0.3
+[1.0.2]: https://github.com/Creative781/obsimap/releases/tag/1.0.2
+[1.0.1]: https://github.com/Creative781/obsimap/releases/tag/1.0.1
+[1.0.0]: https://github.com/Creative781/obsimap/releases/tag/1.0.0

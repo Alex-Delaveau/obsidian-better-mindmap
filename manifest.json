@@ -1,9 +1,9 @@
 {
     "id": "better-simple-mindmap",
     "name": "Better Mindmap",
-    "version": "1.2.0",
+    "version": "1.3.0",
     "minAppVersion": "1.4.14",
-    "description": "Custom build of Simple Mindmap: chip colours, text wrapping, children on four sides, styled note links.",
+    "description": "Custom build of Simple Mindmap: chip colours, text wrapping, children on four sides, styled note links, SVG/PNG/PDF export.",
     "author": "Alex Delaveau",
     "authorUrl": "https://github.com/Alex-Delaveau",
     "isDesktopOnly": false

@@ -66,7 +66,10 @@ var DEFAULT_SETTINGS = {
   wrapLength: 30,
   showFullText: true,
   nodeStyle: "pill",
-  layoutMode: "outline"
+  layoutMode: "outline",
+  exportTheme: "current",
+  exportTransparent: false,
+  exportScale: 2
 };
 
 // src/shared/layout.ts
@@ -406,7 +409,157 @@ function hitPole(size, relX, relY, radius, prefer, exclude) {
   return best;
 }
 
+// src/core/export.ts
+async function rasterize(doc, scale, type, fallbackBg = "#ffffff") {
+  var _a;
+  const url = URL.createObjectURL(new Blob([doc.svg], { type: "image/svg+xml;charset=utf-8" }));
+  try {
+    const img = new Image();
+    img.decoding = "sync";
+    img.src = url;
+    await img.decode();
+    const width = Math.max(1, Math.round(doc.width * scale));
+    const height = Math.max(1, Math.round(doc.height * scale));
+    const canvas = document.createElement("canvas");
+    canvas.width = width;
+    canvas.height = height;
+    const ctx = canvas.getContext("2d");
+    if (!ctx)
+      throw new Error("Canvas is not available");
+    if (type === "image/jpeg") {
+      ctx.fillStyle = (_a = doc.background) != null ? _a : fallbackBg;
+      ctx.fillRect(0, 0, width, height);
+    }
+    ctx.drawImage(img, 0, 0, width, height);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, type, 0.95));
+    if (!blob)
+      throw new Error("Could not encode the image");
+    return { blob, width, height };
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+function jpegToPdf(jpeg, pxW, pxH, pageW, pageH) {
+  const enc = new TextEncoder();
+  const parts = [];
+  const offsets = [];
+  let length = 0;
+  const push = (chunk) => {
+    const bytes = typeof chunk === "string" ? enc.encode(chunk) : chunk;
+    parts.push(bytes);
+    length += bytes.length;
+  };
+  const obj = (n, body) => {
+    offsets[n] = length;
+    push(`${n} 0 obj
+${body}
+endobj
+`);
+  };
+  const w = pageW.toFixed(2);
+  const h = pageH.toFixed(2);
+  const content = `q ${w} 0 0 ${h} 0 0 cm /Im0 Do Q`;
+  push("%PDF-1.4\n%\xE2\xE3\xCF\xD3\n");
+  obj(1, "<< /Type /Catalog /Pages 2 0 R >>");
+  obj(2, "<< /Type /Pages /Kids [3 0 R] /Count 1 >>");
+  obj(3, `<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${w} ${h}] /Resources << /XObject << /Im0 4 0 R >> >> /Contents 5 0 R >>`);
+  offsets[4] = length;
+  push(`4 0 obj
+<< /Type /XObject /Subtype /Image /Width ${pxW} /Height ${pxH} /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length ${jpeg.length} >>
+stream
+`);
+  push(jpeg);
+  push("\nendstream\nendobj\n");
+  obj(5, `<< /Length ${content.length} >>
+stream
+${content}
+endstream`);
+  const xref = length;
+  let table = `xref
+0 6
+0000000000 65535 f 
+`;
+  for (let i = 1; i <= 5; i++)
+    table += `${String(offsets[i]).padStart(10, "0")} 00000 n 
+`;
+  push(table);
+  push(`trailer
+<< /Size 6 /Root 1 0 R >>
+startxref
+${xref}
+%%EOF
+`);
+  const out = new Uint8Array(length);
+  let pos = 0;
+  for (const p of parts) {
+    out.set(p, pos);
+    pos += p.length;
+  }
+  return out;
+}
+async function rasterPdf(doc, scale) {
+  const { blob, width, height } = await rasterize(doc, scale, "image/jpeg");
+  const jpeg = new Uint8Array(await blob.arrayBuffer());
+  return jpegToPdf(jpeg, width, height, doc.width * 0.75, doc.height * 0.75);
+}
+function electronRemote() {
+  var _a;
+  try {
+    const req = window.require;
+    const electron = req == null ? void 0 : req("electron");
+    if ((_a = electron == null ? void 0 : electron.remote) == null ? void 0 : _a.BrowserWindow)
+      return electron.remote;
+    const remote = req == null ? void 0 : req("@electron/remote");
+    return (remote == null ? void 0 : remote.BrowserWindow) ? remote : null;
+  } catch (e) {
+    return null;
+  }
+}
+async function vectorPdf(doc) {
+  var _a;
+  const remote = electronRemote();
+  if (!remote)
+    return null;
+  const win = new remote.BrowserWindow({ show: false, webPreferences: { javascript: false } });
+  try {
+    const html = `<!doctype html><html><head><meta charset="utf-8"><style>@page{size:${doc.width}px ${doc.height}px;margin:0}html,body{margin:0;padding:0}body{background:${(_a = doc.background) != null ? _a : "transparent"}}svg{display:block}</style></head><body>${doc.svg}</body></html>`;
+    await win.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    const data = await win.webContents.printToPDF({
+      printBackground: true,
+      preferCSSPageSize: true,
+      margins: { marginType: "none" }
+    });
+    return new Uint8Array(data);
+  } catch (e) {
+    console.warn("[better-mindmap] vector PDF failed, falling back to raster", e);
+    return null;
+  } finally {
+    win.destroy();
+  }
+}
+
 // src/core/main.ts
+var EXPORT_STYLE_PROPS = [
+  "fill",
+  "fill-opacity",
+  "stroke",
+  "stroke-width",
+  "stroke-opacity",
+  "stroke-dasharray",
+  "stroke-linecap",
+  "stroke-linejoin",
+  "opacity",
+  "font-family",
+  "font-size",
+  "font-weight",
+  "font-style",
+  "letter-spacing",
+  "text-decoration-line",
+  "text-decoration-color",
+  "text-decoration-style",
+  "text-decoration-thickness",
+  "text-underline-offset"
+];
 var DIR_LABELS = { n: "North (above)", e: "East (right)", s: "South (below)", w: "West (left)" };
 var DIR_ICONS = { n: "arrow-up", e: "arrow-right", s: "arrow-down", w: "arrow-left" };
 function collectVaultFolders(root) {
@@ -464,6 +617,21 @@ var MindMapPlugin = class extends import_obsidian.Plugin {
       void this.activateView();
     });
     this.addSettingTab(new MindMapSettingTab(this.app, this));
+    const exportCommand = (format, label) => this.addCommand({
+      id: `export-${format}`,
+      name: `Export mind map as ${label}`,
+      checkCallback: (checking) => {
+        const view = this.app.workspace.getActiveViewOfType(MindMapView);
+        if (!view)
+          return false;
+        if (!checking)
+          void view.exportImage(format);
+        return true;
+      }
+    });
+    exportCommand("svg", "SVG");
+    exportCommand("png", "PNG");
+    exportCommand("pdf", "PDF");
     this.addCommand({
       id: "import-markdown",
       name: "Import current note",
@@ -677,6 +845,10 @@ var _MindMapSettingTab = class extends import_obsidian.PluginSettingTab {
       this.buildHotkeySetting(new import_obsidian.Setting(opsSection), name, key);
     }
     this.buildNodeStyleSetting(new import_obsidian.Setting(containerEl));
+    new import_obsidian.Setting(containerEl).setName("Image export").setHeading();
+    this.buildExportThemeSetting(new import_obsidian.Setting(containerEl));
+    this.buildExportTransparentSetting(new import_obsidian.Setting(containerEl));
+    this.buildExportScaleSetting(new import_obsidian.Setting(containerEl));
     new import_obsidian.Setting(containerEl).setName("Navigation and movement").setHeading();
     containerEl.createEl("p", { text: "Configure how you navigate and move nodes.", cls: "setting-item-description" });
     const moveSection = containerEl.createDiv();
@@ -758,6 +930,30 @@ var _MindMapSettingTab = class extends import_obsidian.PluginSettingTab {
       if (leaf.view instanceof MindMapView)
         leaf.view.render();
     });
+  }
+  buildExportThemeSetting(setting) {
+    setting.setName("Export colors").setDesc("Colors used for SVG, PNG and PDF export.").addDropdown(
+      (d) => d.addOption("current", "Current theme").addOption("light", "Light").addOption("dark", "Dark").setValue(this.plugin.settings.exportTheme).onChange((value) => {
+        this.plugin.settings.exportTheme = value === "light" || value === "dark" ? value : "current";
+        void this.plugin.saveSettings();
+      })
+    );
+  }
+  buildExportTransparentSetting(setting) {
+    setting.setName("Transparent background").setDesc("SVG and PNG exports without background (PDF always keeps one).").addToggle(
+      (t) => t.setValue(this.plugin.settings.exportTransparent).onChange((value) => {
+        this.plugin.settings.exportTransparent = value;
+        void this.plugin.saveSettings();
+      })
+    );
+  }
+  buildExportScaleSetting(setting) {
+    setting.setName("PNG resolution").setDesc("Pixel density of PNG exports (2\xD7 is sharp on most screens, 4\xD7 for print).").addDropdown(
+      (d) => d.addOption("1", "1\xD7").addOption("2", "2\xD7").addOption("3", "3\xD7").addOption("4", "4\xD7").setValue(String(this.plugin.settings.exportScale)).onChange((value) => {
+        this.plugin.settings.exportScale = Number(value) || 2;
+        void this.plugin.saveSettings();
+      })
+    );
   }
   buildShowFullTextSetting(setting) {
     setting.setName("Always show full text").setDesc("Never truncate node text: long text wraps onto as many lines as needed.").addToggle(
@@ -883,6 +1079,24 @@ var _MindMapSettingTab = class extends import_obsidian.PluginSettingTab {
         desc: "Start a new line after this many characters (at a word boundary). 0 keeps every node on one line.",
         aliases: searchAliases,
         render: (setting) => this.buildWrapLengthSetting(setting)
+      },
+      {
+        name: "Export colors",
+        desc: "Colors used for SVG, PNG and PDF export.",
+        aliases: searchAliases,
+        render: (setting) => this.buildExportThemeSetting(setting)
+      },
+      {
+        name: "Transparent background",
+        desc: "SVG and PNG exports without background (PDF always keeps one).",
+        aliases: searchAliases,
+        render: (setting) => this.buildExportTransparentSetting(setting)
+      },
+      {
+        name: "PNG resolution",
+        desc: "Pixel density of PNG exports (2\xD7 is sharp on most screens, 4\xD7 for print).",
+        aliases: searchAliases,
+        render: (setting) => this.buildExportScaleSetting(setting)
       },
       {
         name: "Node style",
@@ -1111,6 +1325,10 @@ ${jsonData}
     this.createControlButton(btnContainer, "lucide-file-input", "Import markdown", () => void this.promptImport());
     this.createControlButton(btnContainer, "lucide-file-output", "Export markdown", () => void this.exportMarkdown());
     this.createControlButton(btnContainer, "lucide-file-text", "Full note", () => void this.exportFullNote());
+    const imageBtn = this.createControlButton(btnContainer, "lucide-image-down", "Export image", () => {
+      const r = imageBtn.getBoundingClientRect();
+      this.openExportMenu(r.left, r.bottom + 6);
+    });
     this.svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
     this.svg.setAttribute("width", "100%");
     this.svg.setAttribute("height", "100%");
@@ -2309,6 +2527,139 @@ ${jsonData}
     this.scrollSelectionIntoView();
     void this.saveMindMap(true);
   }
+  // ------------------------------------------------------------------ image export
+  openExportMenu(x, y) {
+    const menu = new import_obsidian.Menu();
+    const formats = [
+      ["svg", "Export as SVG", "file-code"],
+      ["png", "Export as PNG", "image"],
+      ["pdf", "Export as PDF", "file-text"]
+    ];
+    for (const [format, title, icon] of formats) {
+      menu.addItem((item) => item.setTitle(title).setIcon(icon).onClick(() => void this.exportImage(format)));
+    }
+    menu.showAtPosition({ x, y });
+  }
+  /**
+   * Standalone SVG of the whole map: no selection, no UI chrome (toggles, drop
+   * poles), every computed style inlined so it renders the same outside Obsidian.
+   * Optionally rendered with the light or dark theme colours.
+   */
+  buildExportSvg() {
+    const container = this.svgContainerEl;
+    if (!container || !this.g)
+      return null;
+    const body = document.body;
+    const want = this.settings.exportTheme;
+    const isDark = body.classList.contains("theme-dark");
+    const swapTheme = want === "light" && isDark || want === "dark" && !isDark;
+    const prevIds = new Set(this.selectedNodeIds);
+    const prevId = this.selectedNodeId;
+    container.classList.add("is-exporting");
+    this.selectedNodeIds.clear();
+    try {
+      if (swapTheme) {
+        body.classList.toggle("theme-dark");
+        body.classList.toggle("theme-light");
+      }
+      this.render();
+      const bbox = this.g.getBBox();
+      const pad = _MindMapView.EXPORT_PADDING;
+      const width = Math.ceil(bbox.width + 2 * pad);
+      const height = Math.ceil(bbox.height + 2 * pad);
+      const background = this.settings.exportTransparent ? null : getComputedStyle(container).backgroundColor;
+      const live = [this.g, ...Array.from(this.g.querySelectorAll("*"))];
+      const clone = this.g.cloneNode(true);
+      const copies = [clone, ...Array.from(clone.querySelectorAll("*"))];
+      const drop = [];
+      live.forEach((el, i) => {
+        const copy = copies[i];
+        const cs = getComputedStyle(el);
+        if (cs.display === "none") {
+          drop.push(copy);
+          return;
+        }
+        const decl = EXPORT_STYLE_PROPS.map((p) => {
+          let value = cs.getPropertyValue(p);
+          if (p === "font-family") {
+            value = value.split(",").map((f) => f.trim()).filter((f) => !/^["']?\?+["']?$/.test(f)).join(", ");
+          }
+          return `${p}:${value}`;
+        }).join(";");
+        copy.setAttribute("style", decl);
+        copy.removeAttribute("class");
+      });
+      drop.forEach((el) => el.remove());
+      clone.setAttribute("transform", `translate(${pad - bbox.x}, ${pad - bbox.y})`);
+      const NS = "http://www.w3.org/2000/svg";
+      const root = document.createElementNS(NS, "svg");
+      root.setAttribute("xmlns", NS);
+      root.setAttribute("width", String(width));
+      root.setAttribute("height", String(height));
+      root.setAttribute("viewBox", `0 0 ${width} ${height}`);
+      if (background) {
+        const bg = document.createElementNS(NS, "rect");
+        bg.setAttribute("width", "100%");
+        bg.setAttribute("height", "100%");
+        bg.setAttribute("fill", background);
+        root.appendChild(bg);
+      }
+      root.appendChild(clone);
+      const svg = new XMLSerializer().serializeToString(root);
+      return { svg, width, height, background };
+    } finally {
+      if (swapTheme) {
+        body.classList.toggle("theme-dark");
+        body.classList.toggle("theme-light");
+      }
+      container.classList.remove("is-exporting");
+      prevIds.forEach((id) => this.selectedNodeIds.add(id));
+      this.selectedNodeId = prevId;
+      this.render();
+    }
+  }
+  async exportImage(format) {
+    var _a, _b, _c, _d, _e;
+    const doc = this.buildExportSvg();
+    if (!doc)
+      return;
+    const notice = new import_obsidian.Notice(`Exporting ${format.toUpperCase()}\u2026`, 0);
+    try {
+      let data;
+      if (format === "svg") {
+        data = `<?xml version="1.0" encoding="UTF-8"?>
+${doc.svg}`;
+      } else if (format === "png") {
+        data = await (await rasterize(doc, this.settings.exportScale, "image/png")).blob.arrayBuffer();
+      } else {
+        const pdfDoc = doc.background ? doc : { ...doc, background: "#ffffff" };
+        const bytes = (_a = await vectorPdf(pdfDoc)) != null ? _a : await rasterPdf(pdfDoc, Math.max(3, this.settings.exportScale));
+        data = bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+      }
+      const folder = this.settings.exportFolder || ((_c = (_b = this.file) == null ? void 0 : _b.parent) == null ? void 0 : _c.path) || "";
+      const base = ((_e = (_d = this.file) == null ? void 0 : _d.basename) != null ? _e : this.mindMapData.root.text).replace(/[/\\?%*:|"<>]/g, "-").trim() || "Mind map";
+      const path = folder && folder !== "/" ? `${folder}/${base}.${format}` : `${base}.${format}`;
+      await this.ensureFolderExists(folder === "/" ? "" : folder);
+      const existing = this.app.vault.getAbstractFileByPath(path);
+      if (existing instanceof import_obsidian.TFile) {
+        if (typeof data === "string")
+          await this.app.vault.modify(existing, data);
+        else
+          await this.app.vault.modifyBinary(existing, data);
+      } else if (typeof data === "string") {
+        await this.app.vault.create(path, data);
+      } else {
+        await this.app.vault.createBinary(path, data);
+      }
+      notice.hide();
+      new import_obsidian.Notice(`Mind map exported to ${path}`);
+    } catch (e) {
+      notice.hide();
+      const message = e instanceof Error ? e.message : String(e);
+      new import_obsidian.Notice(`Export failed: ${message}`);
+      console.error("[better-mindmap] export failed", e);
+    }
+  }
   updateTheme(theme) {
     const container = this.contentEl;
     if (container) {
@@ -3480,6 +3831,8 @@ MindMapView.RADIAL_ROOT_X = 500;
 MindMapView.RADIAL_ROOT_Y = 300;
 /** Distance between a target chip and the snapped ghost while dragging onto a pole. */
 MindMapView.SNAP_GAP = 46;
+/** Margin around the map in exported images. */
+MindMapView.EXPORT_PADDING = 40;
 var NoteSuggestModal = class extends import_obsidian.FuzzySuggestModal {
   constructor(app, onSelect) {
     super(app);
